@@ -122,7 +122,7 @@ class ChessBot:
             
         return pieces
     
-    def setup_engine(self, engine_path="fairy-stockfish"):
+    def setup_engine(self, engine_path="stockfish/stockfish-macos-universal"):
         """Настройка шахматного движка"""
         try:
             self.engine = chess.engine.SimpleEngine.popen_uci(engine_path)
@@ -160,10 +160,22 @@ class ChessBot:
         if not self.screen_region:
             return None
             
-        with mss.mss() as sct:
-            screenshot = sct.grab(self.screen_region)
-            img = np.array(screenshot)
-            return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+        # with mss.mss() as sct:
+        #     screenshot = sct.grab(self.screen_region)
+        #     img = np.array(screenshot)
+        #     return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+        bbox = (
+            self.screen_region["left"],
+            self.screen_region["top"],
+            self.screen_region["left"] + self.screen_region["width"],
+            self.screen_region["top"] + self.screen_region["height"],
+        )
+        screenshot = ImageGrab.grab(
+            bbox=bbox,
+            scale_down=True  # Retina screen captures at 1x by default
+        )
+        img = np.array(screenshot)
+        return cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
     
     def preprocess_image(self, image):
         """Предобработка изображения для анализа"""
@@ -185,7 +197,7 @@ class ChessBot:
 
 
         # Загрузка предобученной модели YOLOv8
-        model = YOLO('best.pt')  # yolov8n.pt - самая легкая версия
+        model = YOLO('best_chesscom.pt')  # yolov8n.pt - самая легкая версия
 
         results = model.predict(image, verbose=False)
 
@@ -193,6 +205,7 @@ class ChessBot:
         field = [[None for _ in range(8)] for _ in range(8)]
         for r in results:
             im_array = r.plot()  # изображение с bounding boxes
+            cv2.imwrite('result_board_test.png', im_array)
             
             centers = []
             mn = mx = [r.boxes.data[0][0], r.boxes.data[0][1]]
@@ -365,6 +378,86 @@ class ChessBot:
     def calibrate(self):
         self.calibrate_screen()
 
+    def run_single_move(self, who):
+        """Один раз сканирует доску, находит лучший ход и выполняет его"""
+        print("=== Режим одного хода ===")
+
+        # 1. Загрузка области экрана
+        try:
+            with open('screen.txt') as f:
+                self.screen_region = eval(f.read())
+        except Exception as e:
+            print(f"Не удалось загрузить screen.txt: {e}")
+            print("Сначала выполните калибровку (пункт 2).")
+            return
+
+        # 2. Настройка движка
+        self.setup_engine()
+        if not self.engine:
+            print("Ошибка: шахматный движок недоступен")
+            return
+
+        try:
+            # 3. Захват доски
+            print("Захват доски...")
+            image = self.capture_board()
+            if image is None:
+                print("Не удалось захватить изображение доски")
+                return
+
+            # 4. Распознавание позиции
+            print("Распознавание позиции...")
+            try:
+                state = self.detect_board_state(image, who)
+            except Exception as e:
+                print(f"Ошибка распознавания: {e}")
+                return
+
+            # 5. Выставляем правильную очередь хода
+            turn = 'w' if who == 'w' else 'b'
+            state = chess.Board(change_fen_turn(state.fen(), turn))
+
+            print(f"\nТекущая позиция:\n{state}")
+            print(f"FEN: {state.fen()}")
+            print(f"Ход: {'белые' if turn == 'w' else 'чёрные'}")
+
+            if state.is_game_over():
+                print("Игра уже окончена.")
+                return
+
+            # 6. Поиск лучшего хода
+            print("\nПоиск лучшего хода...")
+            best_move = self.get_best_move(state)
+
+            if best_move is None:
+                print("Не удалось найти ход")
+                return
+
+            if best_move not in state.legal_moves:
+                print(f"Движок вернул недопустимый ход: {best_move}")
+                return
+
+            # 7. Вывод информации о ходе
+            san = state.san(best_move)
+            print(f"\nЛучший ход: {best_move} ({san})")
+            print(f"  Откуда: {chess.square_name(best_move.from_square)}")
+            print(f"  Куда:   {chess.square_name(best_move.to_square)}")
+            if state.is_capture(best_move):
+                print("  Тип:    взятие")
+            if state.is_castling(best_move):
+                print("  Тип:    рокировка")
+            if best_move.promotion:
+                print(f"  Тип:    превращение в {chess.piece_name(best_move.promotion)}")
+
+            # 8. Выполнение хода
+            # print("\nВыполнение хода...")
+            # self.execute_move(best_move, who)
+            print("Готово.")
+        finally:
+            if self.engine:
+                self.engine.quit()
+                self.engine = None
+
     def start(self, who):
         """Запуск бота"""
         print("Запуск шахматного бота...")
@@ -404,20 +497,23 @@ class ChessBot:
 
 def main():
     bot = ChessBot()
-    
+
     print("Шахматный бот")
     print("1. Запустить бота")
     print("2. Калибровка")
-    print("3. Выход")
-    
-    # choice = input("Выберите опцию: ")
-    choice = "1"
-    who_moves = 'w' if input('who moves') == 'w' else 'b'
-    
+    print("3. Один ход")
+    print("4. Выход")
+
+    choice = input("Выберите опцию: ").strip()
+
     if choice == "1":
+        who_moves = 'w' if input('who moves (w/b): ').strip().lower() == 'w' else 'b'
         bot.start(who_moves)
     elif choice == "2":
         bot.calibrate()
+    elif choice == "3":
+        who_moves = 'w' if input('who moves (w/b): ').strip().lower() == 'w' else 'b'
+        bot.run_single_move(who_moves)
     else:
         print("Выход")
 

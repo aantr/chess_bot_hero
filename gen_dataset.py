@@ -290,7 +290,7 @@ def create_synthetic_chessboard(cell_images, image_path, output_path, add_pieces
 
 def main():
     # Создаем генератор датасета
-    os.system('cp 11.png 1.png')
+    os.system('cp image.png 1.png')
 
     generator = ChessboardDatasetGenerator("chess_dataset")
 

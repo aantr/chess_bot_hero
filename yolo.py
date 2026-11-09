@@ -25,11 +25,14 @@ model = YOLO('yolov8n.pt')
 # results = model.train(
 #     data='dataset.yaml',
 #     epochs=100,
-#     imgsz=1024,
-#     batch=64,
+#     imgsz=640,
+#     batch=16,
 #     lr0=0.001,
 #     device='cpu',  # или 'cuda' если есть GPU
-    
+#     project='chess_model_training',
+#     name='yolov8_chess',
+#     exist_ok=True,  # перезаписывать существующую папку с результатами
+#     save_dir='chess_model_training/yolov8_chess'    
 # )
 
 from ultralytics import YOLO
@@ -37,11 +40,11 @@ import cv2
 import matplotlib.pyplot as plt
 
 # Загрузка предобученной модели YOLOv8
-model = YOLO('best.pt')  # yolov8n.pt - самая легкая версия
+model = YOLO('best_chesscom.pt')  # yolov8n.pt - самая легкая версия
 model.save('model')
 
 # Распознавание на изображении
-results = model('screnrenr.png')
+results = model('image.png')
 
 # Визуализация результатов
 field = [[None for _ in range(8)] for _ in range(8)]
